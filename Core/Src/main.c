@@ -43,6 +43,34 @@
 UART_HandleTypeDef hlpuart1;
 
 /* USER CODE BEGIN PV */
+uint16_t ButtonState = 0;
+uint16_t secretNumber; //random_number 0-999
+uint16_t Number = 0; //button 0-9
+uint16_t n = 0; //position in array
+int bm = 0;
+int mode = 0;
+int state = 0;
+int guessCount = 0; //count1-5
+int guessNumber[3]; //input
+//int RandomNumber[3]; //check_number
+struct _ButMtx_Struct
+{
+	GPIO_TypeDef* Port;
+	uint16_t Pin;
+};
+
+struct _ButMtx_Struct BMX_L[4] = {
+	{GPIOA,GPIO_PIN_9},
+	{GPIOC,GPIO_PIN_7},
+	{GPIOB,GPIO_PIN_6},
+	{GPIOA,GPIO_PIN_7}
+};
+
+struct _ButMtx_Struct BMX_R[3] = {
+	{GPIOB,GPIO_PIN_5},
+	{GPIOB,GPIO_PIN_4},
+	{GPIOB,GPIO_PIN_10},
+};
 
 /* USER CODE END PV */
 
@@ -51,7 +79,9 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_LPUART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+void ButtonMatrixRead();
+void CheckNumber();
+void CheckRandom();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -67,7 +97,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-
+	//secretNumber = rand()%999; // Generate a random number between 0 and 999
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -100,6 +130,19 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  static uint32_t BTMX_TimeStamp = 0;
+	  if(HAL_GetTick() > BTMX_TimeStamp)
+	  {
+	  	BTMX_TimeStamp = HAL_GetTick() + 25; //next scan in 25 ms
+	  	ButtonMatrixRead();
+	  	CheckNumber();
+	  	CheckRandom();
+	  }
+	  bm = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);    //change GPIO
+	  if(bm == 1 && mode == 0){
+		  secretNumber = rand()%999; // Generate a random number between 0 and 999
+		  mode = 1;
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -217,11 +260,20 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10|GPIO_PIN_4|GPIO_PIN_5, GPIO_PIN_SET);
+
   /*Configure GPIO pin : B1_Pin */
   GPIO_InitStruct.Pin = B1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(B1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
@@ -229,6 +281,31 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA7 PA9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB10 PB4 PB5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_10|GPIO_PIN_4|GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PC7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PB6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
@@ -239,7 +316,112 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void ButtonMatrixRead(){
+	static uint8_t X=0;
+	for(int i=0; i<4; i++)
+	{
+	if(HAL_GPIO_ReadPin(BMX_L[i].Port, BMX_L[i].Pin) == GPIO_PIN_RESET)
+	{
+		ButtonState |= 1 << (i + (X * 4));
+	}
+	else
+	{
+		ButtonState &= ~(1 << (i + (X * 4)));
+	}
+	}
+	//set currentL to Hi-z (open drain)
+	HAL_GPIO_WritePin(BMX_R[X].Port, BMX_R[X].Pin, GPIO_PIN_SET);
+	//set nextL to low
+	uint8_t nextX = (X + 1) %3;
+	HAL_GPIO_WritePin(BMX_R[nextX].Port, BMX_R[nextX].Pin, GPIO_PIN_RESET);
+	X = nextX;
+}
+void CheckNumber(){
+	if(ButtonState == 8)
+		{
+			Number = 0;
+		}
+		else if(ButtonState == 4)
+		{
+			Number = 1;
+		}
+		else if(ButtonState == 64)
+		{
+			Number = 2;
+		}
+		else if(ButtonState == 1024)
+		{
+			Number = 3;
+		}
+		else if(ButtonState == 2)
+	    {
+			Number = 4;
+		}
+		else if(ButtonState == 32)
+		{
+			Number = 5;
+		}
+		else if(ButtonState == 512)
+		{
+			Number = 6;
+		}
+		else if(ButtonState == 1)
+		{
+			Number = 7;
+		}
+		else if(ButtonState == 16)
+		{
+			Number = 8;
+		}
+		else if(ButtonState == 256)
+		{
+			Number = 9;
+		}
 
+		if(ButtonState != 0 && ButtonState != 128 && ButtonState != 2048)
+		{
+			state = 1;
+		}
+
+
+		if(state == 1)
+		{
+			if(ButtonState == 0)
+			{
+				guessNumber[n] = Number;
+				n++;
+				state = 0;
+			}
+		}
+
+		if(ButtonState == 2048 && memcmp(secretNumber,guessNumber,sizeof(secretNumber)) == 0) //OK
+		{
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,GPIO_PIN_SET); //ไฟติด
+		}
+}
+void CheckRandom(){
+	if(mode == 1){
+		for(int i = 0; i <= 5; i++)
+		{
+			guessCount = i;
+			if(guessNumber[3] == secretNumber)
+			{
+				printf("Congratulations! You guessed the correct number.\n");
+				HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,GPIO_PIN_SET); //LED on
+				guessCount += 1;
+			}
+			else{
+				if(guessNumber[3] > secretNumber){
+					printf("Too high!\n");
+				}else{
+					printf("Too low!\n");
+				}
+
+			}
+		}
+	}
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5,GPIO_PIN_RESET); //LED off
+}
 /* USER CODE END 4 */
 
 /**
